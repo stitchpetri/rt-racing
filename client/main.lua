@@ -34,6 +34,13 @@ if not testActive then
 end, false)
 
 
+local function DrawMarkerRDR(x, y, z)
+  Citizen.InvokeNative(0x2A32FAA57B937173,0x50638AB9, x, y, z,
+            0.0,0.0,0.0, 0.0,0.0,0.0,
+            cfg.radius*2.0, cfg.radius*2.0, 1.2,
+            255,255,255, 120, false, true, 2, nil, nil, false)
+end
+
 -- draw markers for start/finish and detect finish
 
 CreateThread(function()
@@ -42,16 +49,11 @@ CreateThread(function()
 
         if testActive then
         -- start marker
-        DrawMarker(1, cfg.start.x, cfg.start.y, cfg.start.z - 1.0,
-            0.0,0.0,0.0, 0.0,0.0,0.0,
-            cfg.radius*2.0, cfg.radius*2.0, 1.2,
-            255,255,255, 120, false, true, 2, nil, nil, false)
+        DrawMarkerRDR(cfg.start.x, cfg.start.y, cfg.start.z -1)
 
         -- finish marker
-        DrawMarker(1, cfg.finish.x, cfg.finish.y, cfg.finish.z - 1.0,
-            0.0,0.0,0.0, 0.0,0.0,0.0,
-            cfg.radius*2.0, cfg.radius*2.0, 1.2,
-            255,255,255, 120, false, true, 2, nil, nil, false)
+        DrawMarkerRDR(cfg.finish.x, cfg.finish.y, cfg.finish.z - 1.0)
+        
         end
 
         if isRunning then
