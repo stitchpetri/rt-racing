@@ -1,187 +1,156 @@
--- client/main.lua
--- Rift Trails Racing – client
--- Responsibilities:
---   • Show markers/blips
---   • Let player arm a simple test run (/rtr_test, /rtr_go)
---   • Time locally, send result to server
+RTR = RTR or {}
+
+-- ================= State =================
+local currentCourse      = nil   -- { id, start, finish, radius }
+local setupActive        = false
+local raceActive         = false
+local joinedThisSetup    = false
+local finishCooldown     = false
+
+local clientStartAtMs = nil
+
+-- tuning
+local startRadius        = 10.0
+local drawDist           = 250.0
+local markerHeight       = 1.8
+
+-- visuals
+local startColor   = { r=60,  g=200, b=60,  a=110 }
+local finishColor  = { r=220, g=60,  b=60,  a=110 }
+
+local INPUT_JOIN = 0x3B24C470      -- F key
 
 
-local cfg = Config.TestCourse
+-- =============== Utils ===============
+local function v3(c) return vector3(c.x+0.0, c.y+0.0, c.z+0.0) end
+local function dist(a, b) return #(a - b) end
+local function radius() return (currentCourse and (currentCourse.radius or startRadius)) or startRadius end
 
-local currentCourse = Config.TestCourse
-local serverRaceActive = false
-local serverCourseId   = nil
-
-local testActive = false
-local isRunning  = false
-local startTime  = 0
-
--- ===== State =====
-
-local testActive = false
-local isRunning = false
-local startTime = 0
-
--- ===== Helpers =====
-local function drawMarkerAt(pos, radius)
-  -- _DRAW_MARKER (RDR2)
+local function drawCylinder(pos, r, col)
+  local me = GetEntityCoords(PlayerPedId())
+  if #(me - v3(pos)) > drawDist then return end
   Citizen.InvokeNative(
-    0x2A32FAA57B937173,            -- drawMarker native
-    0x50638AB9,                    -- marker type hash (cylinder)
+    0x2A32FAA57B937173, 0x50638AB9,
     pos.x, pos.y, pos.z,
     0.0,0.0,0.0, 0.0,0.0,0.0,
-    radius*2.0, radius*2.0, 1.2,
-    255,255,255, 120,
+    r, r, markerHeight,
+    col.r, col.g, col.b, col.a,
     false, true, 2, nil, nil, false
   )
 end
 
-local function refreshStartFinishBlips()
-  RTR.Blips.clear()
-  if testActive then
-    RTR.Blips.add(currentCourse.start,  "Start",  2033377404, "green")
-    RTR.Blips.add(currentCourse.finish, "Finish", 2033377404, "red")
-  end
+local function PromptIsActive(p)
+  local r = p and Citizen.InvokeNative(0x546E342E01DE71CF, p) or 0 -- _UI_PROMPT_IS_ACTIVE
+  return r ~= 0
 end
 
 
-local function nearPoint(pos, target, radius)
-  return #(pos - target) <= radius
+-- =============== uiprompt: group + prompt ===============
+local joinPrompt = nil
+
+local racePrompt = nil
+
+local function LStr(text)
+  -- _CREATE_VAR_STRING(type=10, "LITERAL_STRING", text)
+  return Citizen.InvokeNative(0xFA925AC00EB830B9, 10, "LITERAL_STRING", text, 1)
+end
+
+local function createJoinPrompt(position, radius)
+  local prompt = Citizen.InvokeNative(0x04F97DE45A519419)                           -- _UI_PROMPT_REGISTER_BEGIN
+  Citizen.InvokeNative(0xAE84C5EE2C384FB3, prompt, position.x, position.y, position.z)
+  Citizen.InvokeNative(0x0C718001B77CA468, prompt, radius)
+  PromptSetControlAction(prompt, INPUT_JOIN)
+  PromptSetText(prompt, CreateVarString(10, "LITERAL_STRING", "Join New Race"))
+
+
+  PromptRegisterEnd(prompt)
+
+  return prompt
 end
 
 
-local function tableToVec3(t) return vector3(t.x, t.y, t.z) end
-
-local function setCourseFromServer(c)
-  -- convert plain tables to vector3s
-  currentCourse = {
-    id     = c.id,
-    radius = c.radius,
-    start  = tableToVec3(c.start),
-    finish = tableToVec3(c.finish),
-  }
-  -- optional: show Start/Finish blips automatically
-  RTR.Blips.clear()
-  RTR.Blips.add(currentCourse.start,  "Start",  2033377404, "green")
-  RTR.Blips.add(currentCourse.finish, "Finish", 2033377404, "red")
-end
---================ Events ===============================================
-
-RegisterNetEvent("rtr:countdown", function(i)
-  -- super simple UI via chat for now
-  TriggerEvent('chat:addMessage', { args = { "RTR", ("Starting in %d..."):format(i) } })
+-- =============== Events ===============
+RegisterNetEvent("rtr:race:setup", function(course)
+  currentCourse = course
+  setupActive, raceActive = true, false
+  joinedThisSetup, finishCooldown = false, false
+  racePrompt = createJoinPrompt(currentCourse.start, startRadius)
+  TriggerEvent("rtr:board:on")                 
 end)
 
-RegisterNetEvent("rtr:raceGo", function(courseId)
-  serverRaceActive = true
-  serverCourseId   = courseId
-  isRunning = true
-  startTime = GetGameTimer()
-  TriggerEvent('chat:addMessage', { args = { "RTR", "GO!" } })
-  -- lock early starts -> ignore /rtr_go during server races.
+RegisterNetEvent("rtr:countdown", function(n)
+  TriggerEvent('chat:addMessage', { args = {"RTR", ("Race starts in %d…"):format(tonumber(n) or 0)} })
+end)
+
+RegisterNetEvent("rtr:race:start", function(startAtMs, names)
+  setupActive  = false
+  raceActive   = true
+  finishCooldown = false
+  clientStartAtMs = GetGameTimer()
 
 end)
 
-RegisterNetEvent("rtr:setCourse", function(c)
-  if c then setCourseFromServer(c) end
+RegisterNetEvent("rtr:race:stop", function()
+  setupActive, raceActive = false, false
+  finishCooldown = false
+
 end)
 
 RegisterNetEvent("rtr:raceReset", function()
-  serverRaceActive = false
-  serverCourseId   = nil
-  isRunning        = false
-  RTR.Blips.clear()
+  setupActive, raceActive = false, false
+  finishCooldown = false
+  
 end)
 
-
--- ===== Commands =====
-
--- Debug command: /rtr_testblip
-RegisterCommand("rtr_testblip", function()
-    --RTR.Blips.clear()
-
-    local ped = PlayerPedId()
-    local pos = GetEntityCoords(ped)
-
-    --RTR.Blips.add(pos, "Test Blip", 2033377404, "green")
-    Blips.addCheckpoint(pos)
-
-    TriggerEvent("chat:addMessage", {
-        args = { "RTR", "Test blip added at your location." }
-    })
-end, false)
-
--- /rtr_clearblip to remove all
-RegisterCommand("rtr_clearblip", function()
-    RTR.Blips.clear()
-    TriggerEvent("chat:addMessage", {
-        args = { "RTR", "All test blips cleared." }
-    })
-end, false)
-
-
--- Toggle showing the course
-RegisterCommand('rtr_test', function()
-testActive = not testActive
-  if Config.Debug then
-    print(testActive and "[RTR] Test course ON" or "[RTR] Test course OFF")
-  end
-  refreshStartFinishBlips()
-end, false)
-
--- Start a local run when you’re in the start bubble
-RegisterCommand('rtr_go', function()
-if serverRaceActive then
-    TriggerEvent('chat:addMessage', { args = { "RTR", "A server race is active — wait for GO!" } })
-    return
-  end
-
-  if not testActive then
-    TriggerEvent('chat:addMessage', { args = { "RTR", "Toggle test first: /rtr_test" } })
-    return
-  end
-
-  local ped = PlayerPedId()
-  local pos = GetEntityCoords(ped)
-
-  if nearPoint(pos, currentCourse.start, currentCourse.radius) then
-    isRunning = true
-    startTime = GetGameTimer()
-    TriggerEvent('chat:addMessage', {
-      args = { "RTR", ("Run started on %s!"):format(currentCourse.name or ("Course " .. tostring(currentCourse.id))) }
-    })
-  else
-    TriggerEvent('chat:addMessage', { args = { "RTR", "Get to the start bubble to /rtr_go" } })
-  end
-end, false)
-
--- ===== Main draw / finish detection loop =====
+-- =============== Main Loop ===============
 CreateThread(function()
   while true do
-    Wait(0)
+    local wait = 500
 
-    if testActive then
-      drawMarkerAt(vector3(currentCourse.start.x,  currentCourse.start.y,  currentCourse.start.z - 1.0),  currentCourse.radius)
-      drawMarkerAt(vector3(currentCourse.finish.x, currentCourse.finish.y, currentCourse.finish.z - 1.0), currentCourse.radius)
-    end
+    if currentCourse then
+      if setupActive then
+        wait = 0
+        -- Show START marker (match the prompt radius)
+        drawCylinder(currentCourse.start, startRadius, startColor)
 
-    if isRunning or serverRaceActive then
-      local ped = PlayerPedId()
-      local pos = GetEntityCoords(ped)
-
-      if nearPoint(pos, currentCourse.finish, currentCourse.radius) then
-        isRunning = false
-        local elapsed = GetGameTimer() - startTime
-
-        if serverRaceActive and serverCourseId == currentCourse.id then
-          TriggerServerEvent('rtr:finishedServerRace', serverCourseId)
-          serverRaceActive = false              
-        else
-          TriggerServerEvent('rtr:submitTime', currentCourse.id, elapsed)
+        local active = PromptIsActive(racePrompt)
+        if active and IsControlJustPressed(0, INPUT_JOIN) and not joinedThisSetup then
+          TriggerServerEvent("rtr:race:join")
+          joinedThisSetup = true
+          TriggerEvent('chat:addMessage', { args = {"RTR","You joined the race"} })
+          Citizen.InvokeNative(0x00EDE88D4D13CF59, racePrompt)  -- _UI_PROMPT_DELETE
+          racePrompt = nil
         end
 
-        TriggerEvent('chat:addMessage', { args = { "RTR", ("Finished: %.3f s"):format(elapsed / 1000.0) } })
+      elseif raceActive then
+        wait = 0
+        -- Show FINISH marker
+        drawCylinder(currentCourse.finish, radius(), finishColor)
+
+        -- Finish detection
+        if not finishCooldown then
+          local me = GetEntityCoords(PlayerPedId())
+          if dist(me, v3(currentCourse.finish)) <= radius() then
+            finishCooldown = true
+            local elapsed = 0
+            if clientStartAtMs then
+              elapsed = GetGameTimer() - clientStartAtMs
+            end
+            TriggerServerEvent("rtr:finishedServerRace", currentCourse.id, elapsed)
+            SetTimeout(1500, function() finishCooldown = false end)
+          end
+        end
       end
     end
+
+    Wait(wait)
+  end
+end)
+
+-- =============== Cleanup ===============
+AddEventHandler("onResourceStop", function(res)
+  if res == GetCurrentResourceName() then
+    Citizen.InvokeNative(0x00EDE88D4D13CF59, racePrompt)
+    racePrompt = nil
   end
 end)
