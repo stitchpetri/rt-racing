@@ -1,11 +1,13 @@
 RTR = RTR or {}
 
 -- ================= State =================
-local currentCourse      = nil   -- { id, start, finish, radius }
+local currentCourse      = nil   -- { id, name, radius, start, finish, checkpoints = { vector3, ... } }
 local setupActive        = false
 local raceActive         = false
 local joinedThisSetup    = false
 local finishCooldown     = false
+local checkpointCooldown = false
+local nextCheckpoint     = nil
 
 local clientStartAtMs = nil
 
@@ -13,6 +15,7 @@ local clientStartAtMs = nil
 local startRadius        = 10.0
 local drawDist           = 250.0
 local markerHeight       = 1.8
+local checkpointColor    = { r=60,  g=120, b=220, a=110 }
 
 -- visuals
 local startColor   = { r=60,  g=200, b=60,  a=110 }
@@ -48,13 +51,6 @@ end
 -- =============== uiprompt: group + prompt ===============
 local joinPrompt = nil
 
-local racePrompt = nil
-
-local function LStr(text)
-  -- _CREATE_VAR_STRING(type=10, "LITERAL_STRING", text)
-  return Citizen.InvokeNative(0xFA925AC00EB830B9, 10, "LITERAL_STRING", text, 1)
-end
-
 local function createJoinPrompt(position, radius)
   local prompt = Citizen.InvokeNative(0x04F97DE45A519419)                           -- _UI_PROMPT_REGISTER_BEGIN
   Citizen.InvokeNative(0xAE84C5EE2C384FB3, prompt, position.x, position.y, position.z)
@@ -70,12 +66,76 @@ end
 
 
 -- =============== Events ===============
+local function loadCourse(course)
+  if not course then return end
+  currentCourse = {
+    id     = course.id,
+    name   = course.name,
+    radius = course.radius or startRadius,
+    start  = v3(course.start),
+    finish = v3(course.finish),
+    checkpoints = {}
+  }
+
+  if course.checkpoints then
+    for i, cp in ipairs(course.checkpoints) do
+      currentCourse.checkpoints[i] = v3(cp)
+    end
+  end
+end
+
+local function ensureJoinPrompt()
+  if currentCourse and not joinPrompt then
+    joinPrompt = createJoinPrompt(currentCourse.start, radius())
+  end
+end
+
+local function destroyJoinPrompt()
+  if joinPrompt then
+    Citizen.InvokeNative(0x00EDE88D4D13CF59, joinPrompt)  -- _UI_PROMPT_DELETE
+    joinPrompt = nil
+  end
+end
+
 RegisterNetEvent("rtr:race:setup", function(course)
-  currentCourse = course
+  loadCourse(course)
   setupActive, raceActive = true, false
   joinedThisSetup, finishCooldown = false, false
-  racePrompt = createJoinPrompt(currentCourse.start, startRadius)
-  TriggerEvent("rtr:board:on")                 
+  checkpointCooldown = false
+  nextCheckpoint = nil
+  ensureJoinPrompt()
+end)
+
+RegisterNetEvent("rtr:race:joined", function(course, roster)
+  loadCourse(course or currentCourse)
+  joinedThisSetup = true
+  TriggerEvent("rtr:board:on")
+  if roster then
+    TriggerEvent("rtr:board:setRoster", roster)
+  end
+  destroyJoinPrompt()
+end)
+
+RegisterNetEvent("rtr:race:left", function(roster)
+  joinedThisSetup = false
+  TriggerEvent("rtr:board:off")
+  checkpointCooldown = false
+  if roster then
+    TriggerEvent("rtr:board:setRoster", roster)
+  end
+end)
+
+RegisterNetEvent("rtr:race:joinDenied", function(reason)
+  joinedThisSetup = false
+  ensureJoinPrompt()
+  if reason and reason ~= "" then
+    TriggerEvent('chat:addMessage', { args = {"RTR", tostring(reason)} })
+  end
+end)
+
+RegisterNetEvent("rtr:race:setupEnded", function()
+  setupActive = false
+  destroyJoinPrompt()
 end)
 
 RegisterNetEvent("rtr:countdown", function(n)
@@ -83,23 +143,35 @@ RegisterNetEvent("rtr:countdown", function(n)
 end)
 
 RegisterNetEvent("rtr:race:start", function(startAtMs, names)
-  setupActive  = false
-  raceActive   = true
-  finishCooldown = false
-  clientStartAtMs = GetGameTimer()
+  setupActive      = false
+  raceActive       = true
+  finishCooldown   = false
+  checkpointCooldown = false
+  nextCheckpoint   = 1
+  clientStartAtMs  = GetGameTimer()
+  destroyJoinPrompt()
 
+  if names then
+    TriggerEvent("rtr:board:setRoster", names)
+  end
 end)
 
 RegisterNetEvent("rtr:race:stop", function()
   setupActive, raceActive = false, false
   finishCooldown = false
-
+  checkpointCooldown = false
+  nextCheckpoint = nil
+  destroyJoinPrompt()
 end)
 
 RegisterNetEvent("rtr:raceReset", function()
   setupActive, raceActive = false, false
-  finishCooldown = false
-  
+  joinedThisSetup, finishCooldown = false, false
+  checkpointCooldown = false
+  nextCheckpoint = nil
+  TriggerEvent("rtr:board:off")
+  currentCourse = nil
+  destroyJoinPrompt()
 end)
 
 -- =============== Main Loop ===============
@@ -111,26 +183,44 @@ CreateThread(function()
       if setupActive then
         wait = 0
         -- Show START marker (match the prompt radius)
-        drawCylinder(currentCourse.start, startRadius, startColor)
+        drawCylinder(currentCourse.start, radius(), startColor)
 
-        local active = PromptIsActive(racePrompt)
-        if active and IsControlJustPressed(0, INPUT_JOIN) and not joinedThisSetup then
+        if joinedThisSetup then
+          destroyJoinPrompt()
+        else
+          ensureJoinPrompt()
+        end
+
+        if joinPrompt and PromptIsActive(joinPrompt) and IsControlJustPressed(0, INPUT_JOIN) and not joinedThisSetup then
           TriggerServerEvent("rtr:race:join")
           joinedThisSetup = true
-          TriggerEvent('chat:addMessage', { args = {"RTR","You joined the race"} })
-          Citizen.InvokeNative(0x00EDE88D4D13CF59, racePrompt)  -- _UI_PROMPT_DELETE
-          racePrompt = nil
         end
 
       elseif raceActive then
         wait = 0
-        -- Show FINISH marker
-        drawCylinder(currentCourse.finish, radius(), finishColor)
 
-        -- Finish detection
-        if not finishCooldown then
-          local me = GetEntityCoords(PlayerPedId())
-          if dist(me, v3(currentCourse.finish)) <= radius() then
+        local checkpoints = currentCourse.checkpoints or {}
+        local target = currentCourse.finish
+        local isFinish = true
+
+        if nextCheckpoint and checkpoints[nextCheckpoint] then
+          target = checkpoints[nextCheckpoint]
+          isFinish = false
+        end
+
+        drawCylinder(target, radius(), isFinish and finishColor or checkpointColor)
+
+        local me = GetEntityCoords(PlayerPedId())
+
+        if not isFinish and not checkpointCooldown then
+          if dist(me, v3(target)) <= radius() then
+            checkpointCooldown = true
+            nextCheckpoint = nextCheckpoint + 1
+            TriggerEvent('chat:addMessage', { args = {"RTR", ("Checkpoint %d cleared"):format(nextCheckpoint - 1)} })
+            SetTimeout(750, function() checkpointCooldown = false end)
+          end
+        elseif isFinish and not finishCooldown then
+          if dist(me, v3(target)) <= radius() then
             finishCooldown = true
             local elapsed = 0
             if clientStartAtMs then
@@ -150,7 +240,6 @@ end)
 -- =============== Cleanup ===============
 AddEventHandler("onResourceStop", function(res)
   if res == GetCurrentResourceName() then
-    Citizen.InvokeNative(0x00EDE88D4D13CF59, racePrompt)
-    racePrompt = nil
+    destroyJoinPrompt()
   end
 end)
