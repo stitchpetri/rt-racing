@@ -131,8 +131,9 @@ local function drawRectBetween(a, b, opts)
     if ok then gz = groundZ end
   end
 
-  DrawMarker(
-    typeId,
+   Citizen.InvokeNative(
+    0x2A32FAA57B937173, 
+    0x50638AB9,
     cx, cy, gz + zOff,
     0.0, 0.0, 0.0,              -- dir
     0.0, 0.0, heading,          -- rotate only around Z
@@ -312,7 +313,7 @@ CreateThread(function()
       local opts  = (currentCourse.startLine or {})  -- from Config
       local a = vector3(4400.15,-2957.80,50.0)
       local b = vector3(4419.62,-2958.05,50.0)
-      
+
       if setupActive then
         wait = 0
         -- Show START marker 
