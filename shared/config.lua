@@ -24,5 +24,13 @@ Config.Courses = {
     finish = vector3(-2249.33, 635.0, 118.0),
     checkpoints = {}
   },
-  [2] = {}
+  [2] = {
+    id = 2,
+    name = "RTR: TREC Race Track",
+    mode = "time_trial",
+    radius = 5.0,
+    start = vector3(4419.17, -3100.08, 46.67),
+    finish = vector3(4426.51, -3152.53, 46.68),
+    checkpoints = {}
+  }
 }
