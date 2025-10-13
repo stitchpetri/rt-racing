@@ -307,7 +307,10 @@ end)
 CreateThread(function()
   while true do
     local wait = 500
-
+    local opts  = (currentCourse.startLine or {})  -- from Config
+    local a = vector3(4400.15,-2957.80,50.0)
+    local b = vector3(4419.62,-2958.05,50.0)
+    
     if currentCourse then
       if setupActive then
         wait = 0
@@ -315,9 +318,7 @@ CreateThread(function()
         --drawCylinder(currentCourse.start, radius(), startColor)
         --local start = currentCourse.start
   
-        local opts  = (currentCourse.startLine or {})  -- from Config
-        local a = vector3(4400.15,-2957.80,50.0)
-        local b = vector3(4419.62,-2958.05,50.0)
+        
         drawRectBetween(a, b, opts)
 
         if joinedThisSetup then
@@ -343,6 +344,7 @@ CreateThread(function()
           isFinish = false
         end
 
+        drawRectBetween(a, b, opts)
         drawCylinder(target, radius(), isFinish and finishColor or checkpointColor)
 
         local me = GetEntityCoords(PlayerPedId())
