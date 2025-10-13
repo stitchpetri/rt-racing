@@ -99,6 +99,50 @@ local function drawCylinder(pos, r, col)
   )
 end
 
+
+-- Draw a rectangle marker between two endpoints (A,B), thickness centered
+local function drawRectBetween(a, b, opts)
+  opts = opts or {}
+  local typeId  = opts.type or 4          -- rectangular marker
+  local thick   = opts.thickness or opts.width or 3.0
+  local height  = opts.height or 0.4
+  local pad     = opts.pad or 0.0         -- extra length beyond A/B total
+  local zOff    = opts.zOff or -0.95      -- nudge into ground a bit
+  local col     = opts.color or {r=255,g=255,b=255,a=180}
+  local snapGnd = (opts.snapToGround ~= false) -- default true
+
+  -- 2D vector A->B
+  local dx, dy = (b.x - a.x), (b.y - a.y)
+  local len2D  = math.sqrt(dx*dx + dy*dy)
+  if len2D < 0.01 then return end
+
+  -- center point (mid of A & B)
+  local cx = (a.x + b.x) * 0.5
+  local cy = (a.y + b.y) * 0.5
+  local cz = (a.z + b.z) * 0.5
+
+  -- aim rectangle from A to B
+  local heading = GetHeadingFromVector_2d(dx, dy)
+
+  -- optional: snap to ground so line hugs terrain
+  local gz = cz
+  if snapGnd then
+    local ok, groundZ = GetGroundZFor_3dCoord(cx, cy, cz + 10.0, false)
+    if ok then gz = groundZ end
+  end
+
+  DrawMarker(
+    typeId,
+    cx, cy, gz + zOff,
+    0.0, 0.0, 0.0,              -- dir
+    0.0, 0.0, heading,          -- rotate only around Z
+    len2D + pad, thick, height, -- scale: X=length, Y=thickness, Z=height
+    col.r, col.g, col.b, col.a,
+    false, false, 2, true,
+    nil, nil, false
+  )
+end
+
 local function PromptIsActive(p)
   local r = p and Citizen.InvokeNative(0x546E342E01DE71CF, p) or 0 -- _UI_PROMPT_IS_ACTIVE
   return r ~= 0
@@ -269,10 +313,12 @@ CreateThread(function()
         wait = 0
         -- Show START marker 
         --drawCylinder(currentCourse.start, radius(), startColor)
-        local start = currentCourse.start
-        local firstcheckpoint = currentCourse.checkpoints and currentCourse.checkpoints[1] or currentCourse.finish
+        --local start = currentCourse.start
+  
         local opts  = (currentCourse.startLine or {})  -- from Config
-        drawStartLine(start, fistcheckpoint, opts)
+        local a = vector3(4400.15,-2957.80,50.0)
+        local b = vector3(4419.62,-2958.05,50.0)
+        drawRectBetween(a, b, opts)
 
         if joinedThisSetup then
           destroyJoinPrompt()
