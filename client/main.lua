@@ -100,10 +100,16 @@ local function drawCylinder(pos, r, col)
 end
 
 
--- Draw a rectangle marker between two endpoints (A,B), thickness centered
+local function PromptIsActive(p)
+  local r = p and Citizen.InvokeNative(0x546E342E01DE71CF, p) or 0 -- _UI_PROMPT_IS_ACTIVE
+  return r ~= 0
+end
+
+
+
 local function drawRectBetween(a, b, opts)
   opts = opts or {}
-  local typeId  = opts.type or 4          -- rectangular marker
+  local typeId  = 0x6EB7D3BB          -- rectangular marker
   local thick   = opts.thickness or opts.width or 3.0
   local height  = opts.height or 0.4
   local pad     = opts.pad or 0.0         -- extra length beyond A/B total
@@ -131,9 +137,9 @@ local function drawRectBetween(a, b, opts)
     if ok then gz = groundZ end
   end
 
-   Citizen.InvokeNative(
+  Citizen.InvokeNative(
     0x2A32FAA57B937173, 
-    0x50638AB9,
+    typeId,
     cx, cy, gz + zOff,
     0.0, 0.0, 0.0,              -- dir
     0.0, 0.0, heading,          -- rotate only around Z
@@ -142,39 +148,7 @@ local function drawRectBetween(a, b, opts)
     false, false, 2, true,
     nil, nil, false
   )
-end
-
-local function PromptIsActive(p)
-  local r = p and Citizen.InvokeNative(0x546E342E01DE71CF, p) or 0 -- _UI_PROMPT_IS_ACTIVE
-  return r ~= 0
-end
-
-
-
-local function drawStartLine(pos, firstCp, opts)
-  opts = opts or {}
-  local typeId = opts.type or 4 -- rectangle flag marker
-  local len    = opts.length or 12.0
-  local wid    = opts.width  or 3.0
-  local h      = opts.height or 0.4
-  local zOff   = opts.zOff   or -0.95
-  local col    = opts.color  or {r=255,g=255,b=255,a=180}
-
-  -- Aim the rectangle toward the first checkpoint
-  local hx = firstCp.x - pos.x
-  local hy = firstCp.y - pos.y
-  local heading = GetHeadingFromVector_2d(hx, hy) -- degrees
-
-  DrawMarker(
-    typeId,
-    pos.x, pos.y, pos.z + zOff,
-    0.0, 0.0, 0.0,             -- dir
-    0.0, 0.0, heading,         -- rot: we only rotate around Z
-    len,  wid,  h,             -- scale: length, width, height
-    col.r, col.g, col.b, col.a,
-    false, false, 2, true,     -- bob=false, faceCamera=false, p19=2, rotate=true
-    nil, nil, false
-  )
+  print("drawStartLine", pos, firstCp, heading)
 end
 
 
@@ -317,11 +291,10 @@ CreateThread(function()
       if setupActive then
         wait = 0
         -- Show START marker 
-        --drawCylinder(currentCourse.start, radius(), startColor)
-        --local start = currentCourse.start
-  
-        
+        drawCylinder(currentCourse.start, radius(), startColor)
         drawRectBetween(a, b, opts)
+  
+
 
         if joinedThisSetup then
           destroyJoinPrompt()
