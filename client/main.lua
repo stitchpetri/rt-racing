@@ -33,12 +33,13 @@ local function destroyAnchorPrompt()
 end
 
 
-local function createAnchorPrompt(pos, label)
-  local prompt = Citizen.InvokeNative(0x04F97DE45A519419)
-  Citizen.InvokeNative(0xAE84C5EE2C384FB3, prompt, pos.x, pos.y, pos.z)
-  Citizen.InvokeNative(0x0C718001B77CA468, prompt, 2.5) -- radius ring
-  PromptSetControlAction(prompt, INPUT_OPEN)
-  PromptSetText(prompt, CreateVarString(10, "LITERAL_STRING", ("Open %s Events"):format(label or "Course")))
+local function createAnchorPrompt(position, label)
+  local prompt = Citizen.InvokeNative(0x04F97DE45A519419)                           -- _UI_PROMPT_REGISTER_BEGIN
+  Citizen.InvokeNative(0xAE84C5EE2C384FB3, prompt, position.x, position.y, position.z)
+  Citizen.InvokeNative(0x0C718001B77CA468, prompt, 10.0)
+  PromptSetControlAction(prompt, INPUT_OPEN_MENU)
+  PromptSetText(prompt, CreateVarString(10, "LITERAL_STRING", label))
+
   PromptRegisterEnd(prompt)
   return prompt
 end
@@ -47,8 +48,8 @@ end
 local function createOptionPrompt(pos, idx, text)
   local p = Citizen.InvokeNative(0x04F97DE45A519419)
   Citizen.InvokeNative(0xAE84C5EE2C384FB3, p, pos.x, pos.y, pos.z + 0.15 + (idx*0.03))
-  Citizen.InvokeNative(0x0C718001B77CA468, p, 2.5)
-  PromptSetControlAction(p, INPUT_OPEN)  -- reuse E to pick any option
+  Citizen.InvokeNative(0x0C718001B77CA468, p, 10.0)
+  PromptSetControlAction(p, INPUT_OPEN_MENU)  -- reuse E to pick any option
   PromptSetText(p, CreateVarString(10, "LITERAL_STRING", text))
   PromptRegisterEnd(p)
   return p
@@ -269,9 +270,9 @@ CreateThread(function()
         -- Show START marker 
         --drawCylinder(currentCourse.start, radius(), startColor)
         local start = currentCourse.start
-        local first = currentCourse.checkpoints and currentCourse.checkpoints[1] or currentCourse.finish
+        local firstcheckpoint = currentCourse.checkpoints and currentCourse.checkpoints[1] or currentCourse.finish
         local opts  = (currentCourse.startLine or {})  -- from Config
-        drawStartLine(start, fist, opts)
+        drawStartLine(start, fistcheckpoint, opts)
 
         if joinedThisSetup then
           destroyJoinPrompt()
