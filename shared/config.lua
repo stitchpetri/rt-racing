@@ -31,6 +31,6 @@ Config.Courses = {
     radius = 5.0,
     start = vector3(4419.17, -3100.08, 46.67),
     finish = vector3(4426.51, -3152.53, 46.68),
-    checkpoints = {one = vector3(4420.51, -3132.53, 46.68)}
+    checkpoints = {vector3(4420.51, -3132.53, 46.68)}
   }
 }
