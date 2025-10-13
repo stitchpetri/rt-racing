@@ -104,6 +104,34 @@ local function PromptIsActive(p)
 end
 
 
+
+local function drawStartLine(pos, firstCp, opts)
+  opts = opts or {}
+  local typeId = opts.type or 4 -- rectangle flag marker
+  local len    = opts.length or 12.0
+  local wid    = opts.width  or 3.0
+  local h      = opts.height or 0.4
+  local zOff   = opts.zOff   or -0.95
+  local col    = opts.color  or {r=255,g=255,b=255,a=180}
+
+  -- Aim the rectangle toward the first checkpoint
+  local hx = firstCp.x - pos.x
+  local hy = firstCp.y - pos.y
+  local heading = GetHeadingFromVector_2d(hx, hy) -- degrees
+
+  DrawMarker(
+    typeId,
+    pos.x, pos.y, pos.z + zOff,
+    0.0, 0.0, 0.0,             -- dir
+    0.0, 0.0, heading,         -- rot: we only rotate around Z
+    len,  wid,  h,             -- scale: length, width, height
+    col.r, col.g, col.b, col.a,
+    false, false, 2, true,     -- bob=false, faceCamera=false, p19=2, rotate=true
+    nil, nil, false
+  )
+end
+
+
 -- =============== uiprompt: group + prompt ===============
 local joinPrompt = nil
 
@@ -238,8 +266,12 @@ CreateThread(function()
     if currentCourse then
       if setupActive then
         wait = 0
-        -- Show START marker (match the prompt radius)
-        drawCylinder(currentCourse.start, radius(), startColor)
+        -- Show START marker 
+        --drawCylinder(currentCourse.start, radius(), startColor)
+        local start = currentCourse.start
+        local first = currentCourse.checkpoints and currentCourse.checkpoints[1] or currentCourse.finish
+        local opts  = (currentCourse.startLine or {})  -- from Config
+        drawStartLine(start, fist, opts)
 
         if joinedThisSetup then
           destroyJoinPrompt()
