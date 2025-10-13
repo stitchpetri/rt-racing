@@ -1,5 +1,61 @@
 RTR = RTR or {}
 
+-- =============== Anchor Menu  ===============
+local activeAnchorId = nil
+local anchorPrmopt = nil
+local optionPrompts = {} 
+local INPUT_OPEN_MENU = 0xDFF812F9  -- E key
+
+local function nearAnchor()
+  if not Config or not Config.Anchors then return nil end
+  local me = GetEntityCoords(PlayerPedId())
+  for _, a in ipairs(Config.Anchors) do
+    if #(me - vector3(a.position.x, a.position.y, a.position.z)) <= (a.radius or 6.0) then
+      return a
+    end
+  end
+  return nil
+end
+
+local function destroyOptionPrompts()
+  for _, p in ipairs(optionPrompts) do
+    if p.prompt then Citizen.InvokeNative(0x00EDE88D4D13CF59, p.prompt) end
+  end
+  optionPrompts = {}
+end
+
+
+local function destroyAnchorPrompt()
+  if anchorPrompt then
+    Citizen.InvokeNative(0x00EDE88D4D13CF59, anchorPrompt)
+    anchorPrompt = nil
+  end
+end
+
+
+local function createAnchorPrompt(pos, label)
+  local prompt = Citizen.InvokeNative(0x04F97DE45A519419)
+  Citizen.InvokeNative(0xAE84C5EE2C384FB3, prompt, pos.x, pos.y, pos.z)
+  Citizen.InvokeNative(0x0C718001B77CA468, prompt, 2.5) -- radius ring
+  PromptSetControlAction(prompt, INPUT_OPEN)
+  PromptSetText(prompt, CreateVarString(10, "LITERAL_STRING", ("Open %s Events"):format(label or "Course")))
+  PromptRegisterEnd(prompt)
+  return prompt
+end
+
+
+local function createOptionPrompt(pos, idx, text)
+  local p = Citizen.InvokeNative(0x04F97DE45A519419)
+  Citizen.InvokeNative(0xAE84C5EE2C384FB3, p, pos.x, pos.y, pos.z + 0.15 + (idx*0.03))
+  Citizen.InvokeNative(0x0C718001B77CA468, p, 2.5)
+  PromptSetControlAction(p, INPUT_OPEN)  -- reuse E to pick any option
+  PromptSetText(p, CreateVarString(10, "LITERAL_STRING", text))
+  PromptRegisterEnd(p)
+  return p
+end
+
+
+-- =============== RACE SECTION ===============
 -- ================= State =================
 local currentCourse      = nil   -- { id, name, radius, start, finish, checkpoints = { vector3, ... } }
 local setupActive        = false
@@ -174,7 +230,7 @@ RegisterNetEvent("rtr:raceReset", function()
   destroyJoinPrompt()
 end)
 
--- =============== Main Loop ===============
+-- =============== Main Loop ====================================================================================
 CreateThread(function()
   while true do
     local wait = 500
@@ -230,6 +286,48 @@ CreateThread(function()
             SetTimeout(1500, function() finishCooldown = false end)
           end
         end
+      end
+    end
+
+-- ======= Anchor loop
+
+    if not raceActive then
+      local a = nearAnchor()
+      if a then
+        if not anchorPrompt then
+          anchorPrompt = createAnchorPrompt(a.position, a.label)
+          activeAnchorId = a.id
+        end
+
+        -- Open options
+        if anchorPrompt and IsControlJustPressed(0, INPUT_OPEN) then
+          destroyOptionPrompts()
+          -- Build option prompts
+          if a.options then
+            for i, opt in ipairs(a.options) do
+              local label = string.format("[%d] %s", i, opt.label or (opt.type.." "..tostring(opt.id)))
+              local op = createOptionPrompt(a.position, i, label)
+              optionPrompts[#optionPrompts+1] = { prompt=op, anchor=a.id, opt=opt, idx=i }
+            end
+          end
+        end
+
+        -- If options exist, pressing E on any will choose that option
+        if #optionPrompts > 0 then
+          for _, entry in ipairs(optionPrompts) do
+            if Citizen.InvokeNative(0x546E342E01DE71CF, entry.prompt) ~= 0 -- active
+              and IsControlJustPressed(0, INPUT_OPEN) then
+              -- choose
+              TriggerServerEvent("rtr:anchor:choose", entry.anchor, entry.opt)
+              destroyOptionPrompts()
+              break
+            end
+          end
+        end
+      else
+        destroyOptionPrompts()
+        destroyAnchorPrompt()
+        activeAnchorId = nil
       end
     end
 

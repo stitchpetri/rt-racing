@@ -1,9 +1,55 @@
 -- server/main.lua
 -- Rift Trails Racing – server controller
--- Responsibilities:
---   • Maintain authoritative race state
---   • Coordinate course setup/start/finish
---   • Limit race HUD visibility to participating players
+
+
+-- ====== Temporary course & spawned props tracking ======
+local TempCourse = nil  -- { id, name, mode, radius, start, finish, checkpoints }
+local SpawnedProps = {} -- { entityId=true, ... }
+
+local function clearSpawnedProps()
+  for ent, _ in pairs(SpawnedProps) do
+    if DoesEntityExist(ent) then DeleteEntity(ent) end
+  end
+  SpawnedProps = {}
+end
+
+local function layoutToCourse(layoutId)
+  local L = Config.Layouts and Config.Layouts[layoutId]
+  if not L then return nil end
+  -- Synthesize a new course id space (e.g. 10000+) to avoid clashing with static Config.Courses ids
+  local cid = 10000 + math.random(1, 999)
+  TempCourse = {
+    id          = cid,
+    name        = L.name or ("Layout "..layoutId),
+    mode        = L.mode or "time_trial",
+    radius      = L.radius or 5.0,
+    start       = L.start,
+    finish      = L.finish,
+    checkpoints = L.checkpoints or {},
+  }
+  return TempCourse
+end
+
+local function spawnLayoutProps(layoutId)
+  local L = Config.Layouts and Config.Layouts[layoutId]
+  if not L or not L.props then return end
+  for _, p in ipairs(L.props) do
+    local model = p.model
+    if type(model) == "string" then
+      model = GetHashKey(model)
+    end
+    if not IsModelValid(model) then goto continue end
+    RequestModel(model); while not HasModelLoaded(model) do Wait(0) end
+    local ent = CreateObject(model, p.pos.x, p.pos.y, p.pos.z, true, true, false)
+    if ent and ent ~= 0 then
+      if p.h then SetEntityHeading(ent, p.h + 0.0) end
+      FreezeEntityPosition(ent, true)
+      SpawnedProps[ent] = true
+    end
+    ::continue::
+  end
+end
+
 
 local Race = {
   active       = false,
@@ -255,12 +301,6 @@ local function handleLeaveCommand(source)
   end
 end
 
-local function finishRace()
-  broadcastToParticipants("rtr:race:stop")
-  broadcastChat("Race finished!")
-  Race.startAtMs = nil
-end
-
 local function allParticipantsFinished()
   for pid, _ in pairs(Race.participants) do
     if not Race.finished[pid] then
@@ -279,13 +319,13 @@ local function handleStartCommand(source)
     chatMessage(source, "No participants to start.")
     return
   end
-
+  
   endSetupPhase()
   for i = 3, 1, -1 do
     broadcastToParticipants("rtr:countdown", i)
     Wait(1000)
   end
-
+  
   Race.startAtMs = GetGameTimer()
   Race.finished = {}
   local roster = refreshRoster()
@@ -293,15 +333,25 @@ local function handleStartCommand(source)
   broadcastChat("Race started – good luck!")
 end
 
+local function finishRace()
+  broadcastToParticipants("rtr:race:stop")
+  broadcastChat("Race finished!")
+  Race.startAtMs = nil
+  clearSpawnedProps()
+  TempCourse = nil
+end
+
 local function handleResetCommand()
   TriggerClientEvent("rtr:raceReset", -1)
   broadcastChat("Race reset.")
   resetRaceState()
+  clearSpawnedProps()
+  TempCourse = nil
 end
 
 RegisterCommand("race", function(source, args)
   local sub = (args[1] or ""):lower()
-
+  
   if sub == "host" then
     local cid = tonumber(args[2] or "0")
     if not cid or cid <= 0 then
@@ -311,27 +361,27 @@ RegisterCommand("race", function(source, args)
     handleHostCommand(source, cid)
     return
   end
-
+  
   if sub == "join" then
     handleJoinCommand(source)
     return
   end
-
+  
   if sub == "leave" then
     handleLeaveCommand(source)
     return
   end
-
+  
   if sub == "start" then
     handleStartCommand(source)
     return
   end
-
+  
   if sub == "reset" then
     handleResetCommand()
     return
   end
-
+  
   if source > 0 then
     chatMessage(source, "Commands: /race host <id>, /race join, /race leave, /race start, /race reset")
   end
@@ -345,25 +395,85 @@ RegisterNetEvent("rtr:race:join", function()
   end
 end)
 
+
+
 RegisterNetEvent("rtr:finishedServerRace", function(courseId)
   local src = source
   if not Race.active or Race.courseId ~= courseId or not Race.participants[src] or not Race.startAtMs then return end
   if Race.finished[src] then return end
-
+  
   local elapsed = GetGameTimer() - Race.startAtMs
   Race.finished[src] = true
-
+  
   local name, charid = playerDisplayName(src)
   print(("[RTR] (ServerRace) %s (CHARID=%s) finished course %d in %.3fs")
-    :format(name, tostring(charid or "n/a"), courseId, elapsed/1000.0))
-
+  :format(name, tostring(charid or "n/a"), courseId, elapsed/1000.0))
+  
   broadcastToParticipants("rtr:race:participantFinished", name, elapsed)
   chatMessage(src, string.format("You finished in %.3fs", elapsed/1000.0))
-
+  
   if allParticipantsFinished() then
     finishRace()
   end
 end)
+
+
+RegisterNetEvent("rtr:anchor:choose", function(anchorId, opt)
+  local src = source
+  if not opt or not opt.type then return end
+
+  -- Reset any previous hosted state first
+  TriggerClientEvent("rtr:raceReset", -1)
+  resetRaceState()
+  clearSpawnedProps()
+  TempCourse = nil
+
+  if opt.type == "course" then
+    local cid = tonumber(opt.id or 0)
+    if not cid or cid <= 0 then
+      TriggerClientEvent('chat:addMessage', src, { args = {"RTR", "Invalid course."} })
+      return
+    end
+    -- Reuse your existing host pipeline
+    handleHostCommand(src, cid)
+    return
+  end
+
+  if opt.type == "layout" then
+    local course = layoutToCourse(opt.id)
+    if not course then
+      chatMessage(src, "Layout not found.")
+      return
+    end
+
+    -- Spawn the props for this layout
+    spawnLayoutProps(opt.id)
+
+    -- Build a payload compatible with your current client loader
+    local payload = {
+      id = course.id, name = course.name, mode = course.mode,
+      radius = course.radius,
+      start = course.start, finish = course.finish,
+      checkpoints = course.checkpoints
+    }
+
+    -- Flip Race.active and host like your handleHostCommand does
+    Race.active   = true
+    Race.host     = src
+    Race.courseId = course.id
+
+    -- Broadcast setup and auto-join the host (same as host command)
+    TriggerClientEvent("rtr:raceReset", -1)
+    TriggerClientEvent("rtr:race:setup", -1, payload)
+    chatMessage(src, ("Hosted %s. Ride to the marker to join."):format(course.name))
+    local ok = addParticipant(src, { silent = true, skipJoinMessage = true })
+    if ok then
+      chatMessage(src, "Use /race start when everyone is ready. Use /race reset to cancel.")
+    end
+    return
+  end
+end)
+
 
 AddEventHandler("playerDropped", function()
   local src = source

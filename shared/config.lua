@@ -14,6 +14,20 @@ Config.TestCourse = {
 }
 
 
+Config.Anchors = {
+  {
+    id = "trec_race",
+    label = "TREC Race Track",
+    position = vector3(4393.52, 2950.3, 49.18),
+    radius = 6.0, -- how close needed to show prompt
+    options = {
+      type="course", id=2, label="Race Track - 1 lap"},
+
+  }
+  
+}
+
+
 Config.Courses = {
   [1] = {
     id    = 1,
