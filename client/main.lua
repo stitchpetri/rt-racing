@@ -307,11 +307,12 @@ end)
 CreateThread(function()
   while true do
     local wait = 500
-    local opts  = (currentCourse.startLine or {})  -- from Config
-    local a = vector3(4400.15,-2957.80,50.0)
-    local b = vector3(4419.62,-2958.05,50.0)
     
     if currentCourse then
+      local opts  = (currentCourse.startLine or {})  -- from Config
+      local a = vector3(4400.15,-2957.80,50.0)
+      local b = vector3(4419.62,-2958.05,50.0)
+      
       if setupActive then
         wait = 0
         -- Show START marker 
